@@ -73,7 +73,13 @@ bash scoring_platform/run.sh
 | `timestamps/cam2_rgbd_timestamps.csv` | 同上,第二路相机 |
 | `color/cam*_color_rgb_<帧号>_<微秒>us.raw` | RGB888,640×480×3 字节/帧 |
 
-两路相机都齐全的被试才会出现在列表中。默认读取 `../data`(即 `scoring_platform/` 的上级目录下的 `data/`),也可用 `SCORING_DATA_ROOT` 指向任意位置。
+两路相机都齐全的被试才会出现在列表中。默认读取 `../data`(即 `scoring_platform/` 的上级目录下的 `data/`)。
+
+**数据在别的硬盘、不想搬?** 复制 `config.example.json` 为 `config.local.json`,
+把 `data_root` 写成实际位置即可(详见下文「环境变量与本地配置」);也可以在
+**网页上直接切换**:左侧列表顶部的「数据目录」输入框选择/填写路径后点切换按钮,
+选择会写回 `config.local.json` 重启后保持(若配置了 `data_roots` 白名单,网页只能
+切换到列表内的目录)。
 
 > 数据在哪台机器,服务就建议跑在哪台机器(单被试 raw 帧约 72GB,不适合跨网络读取)。
 
@@ -99,18 +105,35 @@ python run.py
 4. 评分卡片输入 0-5 整数分(可留空),点 **保存**;**清除** 只清空该卡片的录入,卡片保留
 5. 左上角 **← 退出标注** 返回列表,继续下一个被试
 
-## 环境变量
+## 环境变量与本地配置
 
-| 变量 | 默认值 | 说明 |
+**本地配置文件 `config.local.json`**(可选,放 `scoring_platform/` 目录下,不进版本库):
+不想每次写环境变量时,用它指定目录,一次配置长期生效——比如数据在另一块硬盘
+不想迁移时,直接指向那个路径:
+
+```json
+{
+  "data_root": "/media/盘2/captures/data",
+  "cache_root": "cache",
+  "annotations_root": "annotations",
+  "part_sets_path": "docs/part_sets.json"
+}
+```
+
+相对路径相对于 `scoring_platform/` 目录。配置项均可省略,省略项走默认值。
+
+| 变量 / 配置键 | 默认值 | 说明 |
 |---|---|---|
+| `SCORING_DATA_ROOT` / `data_root` | `../data` | 采集数据目录(只读) |
+| `SCORING_CACHE_ROOT` / `cache_root` | `cache/` | 预览 MP4 缓存位置 |
+| `SCORING_ANNOTATION_ROOT` / `annotations_root` | `annotations/` | 标注文件所在目录 |
+| `SCORING_PART_SETS_PATH` / `part_sets_path` | `docs/part_sets.json` | 动作序列表位置(改动后重启生效) |
 | `SCORING_HOST` | 127.0.0.1 | 监听地址(远程访问可设 0.0.0.0) |
 | `SCORING_PORT` | 8010 | 端口 |
-| `SCORING_DATA_ROOT` | `../data` | 采集数据目录(只读) |
-| `SCORING_CACHE_ROOT` | `cache/` | 预览 MP4 缓存位置 |
-| `SCORING_ANNOTATION_ROOT` | `annotations/` | 标注文件所在目录 |
-| `SCORING_PART_SETS_PATH` | `docs/part_sets.json` | 动作序列表位置(改动后重启生效) |
 | `SCORING_PREVIEW_FPS` | 30 | 预览 MP4 帧率 |
 | `SCORING_NO_BROWSER` | 未设置 | 设为 1 禁止自动打开浏览器 |
+
+**优先级:启动参数 > 环境变量 > `config.local.json` > 默认值。**
 
 ## 数据与标注文件
 
@@ -122,10 +145,11 @@ python run.py
 
 | 内容 | 要不要带走 | 说明 |
 |---|---|---|
-| `scoring_platform/` 代码与前端 | ✅ 随 git | clone/拷贝即可,含 `docs/part_sets.json` |
+| `scoring_platform/` 代码与前端 | ✅ 随 git | clone/拷贝即可,含 `docs/part_sets.json` 与 `config.example.json` |
 | `annotations/score_annotation.json` | ✅ **必须手动拷贝** | 录好的标注只在这里;不进 git(已被 .gitignore 排除),迁移时单独拷贝,放到新环境的 `scoring_platform/annotations/` 下即可 |
+| `config.local.json` | ❌ 不带走 | 每台机器自己的本地配置(本机 data 目录位置);新机器上按需重新复制 config.example.json 修改 |
 | `cache/` | ❌ 不需要 | MP4 可重新生成 |
-| `data/` | ❌ 不随平台走 | 原始采集数据留在采集主机,平台只读;换机器运行时用 `SCORING_DATA_ROOT` 指向其所在位置 |
+| `data/` | ❌ 不随平台走 | 原始采集数据留在采集主机,平台只读;换机器运行时用 `SCORING_DATA_ROOT` 或 `config.local.json` 指向其所在位置 |
 
 标注文件与新环境的 data 完全匹配时(同一批采集数据),直接拷贝即无缝续用。
 
@@ -140,7 +164,8 @@ python -m pytest tests/ -q
 
 | 现象 | 处理 |
 |---|---|
-| 服务启动但列表为空 | 检查 `data/<日期>/<被试>/timestamps/` 下两路 CSV 是否齐全;或 `SCORING_DATA_ROOT` 是否指向了 data 所在位置 |
+| 数据在另一块硬盘,不想搬过来 | 在 `scoring_platform/config.local.json` 里把 `data_root` 指向那个目录(见「环境变量与本地配置」),重启服务 |
+| 服务启动但列表为空 | 检查 `data/<日期>/<被试>/timestamps/` 下两路 CSV 是否齐全;或 `data_root` 是否指向了 data 所在位置 |
 | 提示未找到 FFmpeg | 标注功能不受影响;按第 2 节安装 FFmpeg 后重启 |
 | 新被试在表格中不存在 | 在 `docs/part_sets.json` 的 `subjects` 中按同样格式添加该编号与 8 个动作代码,重启服务 |
 | 端口被占用 | `SCORING_PORT=8011 python run.py` 换端口 |

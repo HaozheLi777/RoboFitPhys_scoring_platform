@@ -1,6 +1,6 @@
 """scoring_platform 动作卡片标注接口测试(完全独立于采集系统)。
 
-模型:每个被试按 part_sets.xlsx 预创建 11 张固定卡片(warm_up1-3 + 表格 8 动作),
+模型:每个被试按 docs/part_sets.json 预创建 11 张固定卡片(warm_up1-3 + 表格 8 动作),
 保存 = 按 label upsert 卡片边界与分数,删除 = 清除卡片数据保留卡片。
 """
 
@@ -504,6 +504,105 @@ def test_startup_bulk_seeds_all_known_subjects(tmp_path):
             assert a1t["score"] == 3 and a1t["start_position"] == 1000
             listing = (await client.get(f"/api/subjects/{DATE}/{SUBJECT}/sets")).json()["sets"]
             assert len(listing) == 11
+
+    asyncio.run(scenario())
+
+
+def test_local_config_file_sets_data_root(tmp_path, monkeypatch):
+    # config.local.json 指定数据目录;环境变量优先于配置文件
+    import backend as backend_module
+    write_trial(tmp_path)
+    config_dir = tmp_path / "platform"
+    config_dir.mkdir()
+    (config_dir / "config.local.json").write_text(
+        json.dumps({"data_root": str(tmp_path)}), encoding="utf-8"
+    )
+    monkeypatch.setattr(backend_module, "PLATFORM_ROOT", config_dir)
+    app = create_app()
+    assert app.state.data_root == tmp_path.resolve()
+    other = tmp_path / "other_data"
+    other.mkdir()
+    monkeypatch.setenv("SCORING_DATA_ROOT", str(other))
+    app = create_app()
+    assert app.state.data_root == other.resolve()
+    monkeypatch.delenv("SCORING_DATA_ROOT")
+
+
+def test_local_config_overrides_defaults(tmp_path, monkeypatch):
+    # config.local.json 可把 data 目录指到任意硬盘位置;环境变量优先级更高
+    import backend as backend_module
+
+    write_trial(tmp_path / "disk_b", subject=SUBJECT)
+    (tmp_path / "config.local.json").write_text(
+        json.dumps({"data_root": "disk_b"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(backend_module, "PLATFORM_ROOT", tmp_path)
+
+    async def health_of(app) -> dict:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            return (await client.get("/api/health")).json()
+
+    config_app = backend_module.create_app()
+    assert asyncio.run(health_of(config_app))["data_root"] == str((tmp_path / "disk_b").resolve())
+
+    monkeypatch.setenv("SCORING_DATA_ROOT", str(tmp_path / "disk_c"))
+    env_app = backend_module.create_app()
+    assert asyncio.run(health_of(env_app))["data_root"] == str((tmp_path / "disk_c").resolve())
+
+
+def test_data_root_endpoint_switch_and_persist(tmp_path, monkeypatch):
+    # 网页端点切换 data 目录:列表随之变化,选择写回 config.local.json,重启保持
+    import backend as backend_module
+
+    write_trial(tmp_path / "disk_a", subject=SUBJECT)
+    write_trial(tmp_path / "disk_b", subject=SUBJECT2)
+    (tmp_path / "config.local.json").write_text(
+        json.dumps({"data_root": "disk_a"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(backend_module, "PLATFORM_ROOT", tmp_path)
+
+    async def scenario():
+        app = backend_module.create_app()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            current = (await client.get("/api/data-root")).json()
+            assert current["data_root"] == str((tmp_path / "disk_a").resolve())
+            assert (await client.get("/api/subjects")).json()["subjects"][0]["subject_id"] == SUBJECT
+            switched = await client.post("/api/data-root", json={"data_root": str(tmp_path / "disk_b")})
+            assert switched.status_code == 200
+            assert switched.json()["data_root"] == str((tmp_path / "disk_b").resolve())
+            assert (await client.get("/api/subjects")).json()["subjects"][0]["subject_id"] == SUBJECT2
+            saved = json.loads((tmp_path / "config.local.json").read_text(encoding="utf-8"))
+            assert saved["data_root"] == str((tmp_path / "disk_b").resolve())
+            missing = await client.post("/api/data-root", json={"data_root": str(tmp_path / "nope")})
+            assert missing.status_code == 400
+            bad = await client.post("/api/data-root", json={})
+            assert bad.status_code == 400
+
+    asyncio.run(scenario())
+
+
+def test_data_root_whitelist(tmp_path, monkeypatch):
+    # config.local.json 里配置 data_roots 白名单后,网页只能切换到列表内的目录
+    import backend as backend_module
+
+    (tmp_path / "disk_a").mkdir()
+    (tmp_path / "disk_b").mkdir()
+    (tmp_path / "disk_c").mkdir()
+    (tmp_path / "config.local.json").write_text(
+        json.dumps({"data_root": "disk_a", "data_roots": ["disk_a", "disk_b"]}), encoding="utf-8"
+    )
+    monkeypatch.setattr(backend_module, "PLATFORM_ROOT", tmp_path)
+
+    async def scenario():
+        app = backend_module.create_app()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            denied = await client.post("/api/data-root", json={"data_root": str(tmp_path / "disk_c")})
+            assert denied.status_code == 400 and "允许" in denied.json()["detail"]
+            ok = await client.post("/api/data-root", json={"data_root": str(tmp_path / "disk_b")})
+            assert ok.status_code == 200
+            info = (await client.get("/api/data-root")).json()
+            assert info["restricted"] is True
+            assert str((tmp_path / "disk_b").resolve()) in info["candidates"]
 
     asyncio.run(scenario())
 

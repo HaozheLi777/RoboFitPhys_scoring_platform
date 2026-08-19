@@ -34,6 +34,13 @@
             <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
             <input id="subjectSearch" type="search" placeholder="搜索被试编号" autocomplete="off" />
           </label>
+          <div class="data-root-box">
+            <input id="dataRootInput" type="text" list="dataRootOptions" placeholder="数据目录…" spellcheck="false" title="当前数据目录,可切换" />
+            <datalist id="dataRootOptions"></datalist>
+            <button id="applyDataRootButton" class="icon-button" type="button" title="切换到该数据目录" aria-label="切换数据目录">
+              <svg viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg>
+            </button>
+          </div>
           <div id="subjectList" class="subject-list" aria-live="polite">
             <div class="sidebar-skeleton"></div>
             <div class="sidebar-skeleton short"></div>

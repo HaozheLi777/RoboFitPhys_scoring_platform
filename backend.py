@@ -35,6 +35,7 @@ SETS_FILENAME = "score_annotation.json"
 SETS_SCHEMA_VERSION = "1.1.0"
 SETS_MAX_SCORE = 5
 PART_SETS_FILENAME = "part_sets.json"
+LOCAL_CONFIG_FILENAME = "config.local.json"
 # 每个被试的前三个动作固定为热身,只记录起止,不评分
 WARMUP_LABELS = ("warm_up1", "warm_up2", "warm_up3")
 
@@ -131,6 +132,23 @@ def _find_ffmpeg() -> str | None:
     return str(environment_binary) if environment_binary.is_file() else None
 
 
+def _read_local_config() -> dict[str, object]:
+    """读取本地配置文件 config.local.json(可选,不进版本库)。
+
+    用于指定 data/cache/annotations 等目录,免去每次启动写环境变量。
+    缺失/损坏时返回空配置,不影响默认行为。
+    """
+    path = PLATFORM_ROOT / LOCAL_CONFIG_FILENAME
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("本地配置文件读取失败(%s): %s", path, exc)
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _read_part_sets_json(path: Path) -> dict[str, list[str]]:
     """读取动作序列表 JSON:被试编号 → 8 个动作代码(固定顺序)。
 
@@ -159,14 +177,32 @@ def create_app(
     annotations_root: str | Path | None = None,
     part_sets_path: str | Path | None = None,
 ) -> FastAPI:
-    configured_root = data_root or os.getenv("SCORING_DATA_ROOT") or DEFAULT_DATA_ROOT
-    resolved_data_root = Path(configured_root).expanduser().resolve()
-    configured_cache = cache_root or os.getenv("SCORING_CACHE_ROOT") or PLATFORM_ROOT / "cache"
-    resolved_cache_root = Path(configured_cache).expanduser().resolve()
-    configured_annotations = annotations_root or os.getenv("SCORING_ANNOTATION_ROOT") or PLATFORM_ROOT / "annotations"
-    resolved_annotations_root = Path(configured_annotations).expanduser().resolve()
-    configured_part_sets = part_sets_path or os.getenv("SCORING_PART_SETS_PATH") or PLATFORM_ROOT / "docs" / PART_SETS_FILENAME
-    resolved_part_sets_path = Path(configured_part_sets).expanduser().resolve()
+    local_config = _read_local_config()
+
+    def _config_path(key: str) -> Path | None:
+        value = local_config.get(key)
+        if not isinstance(value, str) or not value:
+            return None
+        candidate = Path(value).expanduser()
+        # 相对路径相对于 scoring_platform 目录(配置文件所在位置)
+        return candidate if candidate.is_absolute() else PLATFORM_ROOT / candidate
+
+    def _resolve_path(explicit, env_name: str, config_key: str, default) -> Path:
+        # 优先级:调用参数 > 环境变量 > config.local.json > 默认值
+        if explicit:
+            return Path(explicit).expanduser().resolve()
+        env_value = os.getenv(env_name)
+        if env_value:
+            return Path(env_value).expanduser().resolve()
+        configured = _config_path(config_key)
+        if configured is not None:
+            return configured.resolve()
+        return Path(default).expanduser().resolve()
+
+    resolved_data_root = _resolve_path(data_root, "SCORING_DATA_ROOT", "data_root", DEFAULT_DATA_ROOT)
+    resolved_cache_root = _resolve_path(cache_root, "SCORING_CACHE_ROOT", "cache_root", PLATFORM_ROOT / "cache")
+    resolved_annotations_root = _resolve_path(annotations_root, "SCORING_ANNOTATION_ROOT", "annotations_root", PLATFORM_ROOT / "annotations")
+    resolved_part_sets_path = _resolve_path(part_sets_path, "SCORING_PART_SETS_PATH", "part_sets_path", PLATFORM_ROOT / "docs" / PART_SETS_FILENAME)
     # 启动时加载一次动作序列表(卡片会实体化进标注 JSON,改表后重启服务即可)
     part_sets = _read_part_sets_json(resolved_part_sets_path)
     ffmpeg_binary = _find_ffmpeg()
@@ -185,12 +221,40 @@ def create_app(
     app.state.cache_root = resolved_cache_root
     app.state.annotations_root = resolved_annotations_root
     app.state.part_sets_path = resolved_part_sets_path
+    # data 目录可在运行时切换(网页端点),用可变持有对象保存,所有读取走 settings
+    settings: dict[str, Path] = {"data_root": resolved_data_root}
+
+    def _resolve_config_entry(value: str) -> Path:
+        candidate = Path(value).expanduser()
+        return candidate if candidate.is_absolute() else PLATFORM_ROOT / candidate
+
+    allowed_data_roots = local_config.get("data_roots")
+    allowed_data_roots = [_resolve_config_entry(item) for item in allowed_data_roots] \
+        if isinstance(allowed_data_roots, list) and all(isinstance(item, str) for item in allowed_data_roots) else []
+
+    def _persist_data_root(value: Path) -> None:
+        # 把当前选择写回 config.local.json,重启后保持
+        config_path = PLATFORM_ROOT / LOCAL_CONFIG_FILENAME
+        payload: dict[str, object] = {}
+        if config_path.is_file():
+            try:
+                existing = json.loads(config_path.read_text(encoding="utf-8"))
+                if isinstance(existing, dict):
+                    payload = existing
+            except (OSError, json.JSONDecodeError):
+                pass
+        payload["data_root"] = str(value)
+        try:
+            config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            logger.warning("写入本地配置失败(%s): %s", config_path, exc)
 
     def subject_path(date: str, subject_id: str) -> Path:
         date = _safe_segment(date, "日期")
         subject_id = _safe_segment(subject_id, "被试编号")
-        candidate = (resolved_data_root / date / subject_id).resolve()
-        if candidate.parent.parent != resolved_data_root or not candidate.is_dir():
+        data_root = settings["data_root"]
+        candidate = (data_root / date / subject_id).resolve()
+        if candidate.parent.parent != data_root or not candidate.is_dir():
             raise HTTPException(status_code=404, detail="没有找到该被试的数据")
         return candidate
 
@@ -428,18 +492,55 @@ def create_app(
     @app.get("/api/health")
     async def health() -> dict[str, object]:
         return {
-            "ok": resolved_data_root.is_dir(),
-            "data_root": str(resolved_data_root),
+            "ok": settings["data_root"].is_dir(),
+            "data_root": str(settings["data_root"]),
             "cache_root": str(resolved_cache_root),
             "ffmpeg_available": ffmpeg_binary is not None,
             "part_sets_loaded": len(part_sets),
         }
 
+    def _data_root_candidates() -> list[str]:
+        candidates = [str(settings["data_root"])]
+        for item in allowed_data_roots:
+            candidates.append(str(item.expanduser().resolve()))
+        candidates.append(str(DEFAULT_DATA_ROOT.expanduser().resolve()))
+        unique: list[str] = []
+        for candidate in candidates:
+            if candidate not in unique:
+                unique.append(candidate)
+        return unique
+
+    @app.get("/api/data-root")
+    async def get_data_root() -> dict[str, object]:
+        return {
+            "data_root": str(settings["data_root"]),
+            "candidates": _data_root_candidates(),
+            "restricted": bool(allowed_data_roots),
+        }
+
+    @app.post("/api/data-root")
+    async def set_data_root(request: Request) -> dict[str, object]:
+        body = await _read_request_body(request)
+        value = body.get("data_root")
+        if not isinstance(value, str) or not value.strip():
+            raise HTTPException(status_code=400, detail="无效的数据目录")
+        target = Path(value).expanduser().resolve()
+        if not target.is_dir():
+            raise HTTPException(status_code=400, detail="数据目录不存在或不可访问")
+        if allowed_data_roots and target not in {item.expanduser().resolve() for item in allowed_data_roots}:
+            raise HTTPException(status_code=400, detail="该目录不在允许的数据目录列表中")
+        if target != settings["data_root"]:
+            settings["data_root"] = target
+            app.state.data_root = target
+            load_subject.cache_clear()
+            _persist_data_root(target)
+        return {"data_root": str(target), "candidates": _data_root_candidates()}
+
     @app.get("/api/subjects")
     async def list_subjects() -> dict[str, object]:
         subjects: list[dict[str, object]] = []
-        if resolved_data_root.is_dir():
-            for date_dir in sorted(resolved_data_root.iterdir(), reverse=True):
+        if settings["data_root"].is_dir():
+            for date_dir in sorted(settings["data_root"].iterdir(), reverse=True):
                 if not date_dir.is_dir() or date_dir.name.startswith("."):
                     continue
                 for trial_path in sorted(date_dir.iterdir()):
@@ -467,7 +568,7 @@ def create_app(
                                 },
                             }
                         )
-        return {"data_root": str(resolved_data_root), "subjects": subjects}
+        return {"data_root": str(settings["data_root"]), "subjects": subjects}
 
     @app.get("/api/subjects/{date}/{subject_id}")
     async def subject_metadata(date: str, subject_id: str) -> dict[str, object]:
@@ -663,12 +764,12 @@ def create_app(
     def _seed_all_known_subjects() -> None:
         # 启动时批量预录入:扫描 data 目录,把表格中存在的被试一次性写入 JSON。
         # 幂等:已存在的条目绝不覆盖(保护已有标注);不写文件当且仅当无需新增。
-        if not part_sets or not resolved_data_root.is_dir():
+        if not part_sets or not settings["data_root"].is_dir():
             return
         with sets_lock:
             subjects = _read_annotations()
             changed = False
-            for date_dir in sorted(resolved_data_root.iterdir()):
+            for date_dir in sorted(settings["data_root"].iterdir()):
                 if not date_dir.is_dir() or date_dir.name.startswith("."):
                     continue
                 for trial_dir in sorted(date_dir.iterdir()):

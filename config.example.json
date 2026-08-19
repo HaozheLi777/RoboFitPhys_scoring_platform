@@ -1,0 +1,7 @@
+{
+  "data_root": "../data",
+  "data_roots": ["../data", "/media/盘2/captures/data"],
+  "cache_root": "cache",
+  "annotations_root": "annotations",
+  "part_sets_path": "docs/part_sets.json"
+}

@@ -64,8 +64,11 @@ def main() -> int:
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
 
     import uvicorn
+
+    import backend  # 触发配置解析(参数 > 环境变量 > config.local.json > 默认值)
     print(f"RoboFit 打分平台启动: {url}  (Ctrl+C 退出)")
-    print(f"数据目录: {os.getenv('SCORING_DATA_ROOT') or PLATFORM_ROOT.parent / 'data'}")
+    print(f"数据目录: {backend.app.state.data_root}")
+    print(f"标注目录: {backend.app.state.annotations_root}")
     uvicorn.run("backend:app", host=host, port=port, log_level="info")
     return 0
 

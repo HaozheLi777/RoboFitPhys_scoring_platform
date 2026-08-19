@@ -8,6 +8,8 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   subjectList: $("#subjectList"), subjectSearch: $("#subjectSearch"), refreshButton: $("#refreshButton"),
+  dataRootInput: $("#dataRootInput"), dataRootOptions: $("#dataRootOptions"),
+  applyDataRootButton: $("#applyDataRootButton"),
   subjectSection: $("#subjectSection"), annotationPanel: $("#annotationPanel"),
   annotationList: $("#annotationList"), annotationSubject: $("#annotationSubject"),
   exitAnnotationButton: $("#exitAnnotationButton"),
@@ -154,6 +156,40 @@ async function deleteForSubject(subject) {
     updateSubjectPreview(subject, preview);
     if (state.selected?.key === subject.key) applyPreviewStatus(preview);
     showToast(generating ? "生成已取消，临时文件已清理" : "MP4 缓存已删除，原始数据未受影响");
+  } catch (error) { showToast(error.message); }
+}
+async function loadDataRoot() {
+  try {
+    const data = await requestJson("/api/data-root");
+    elements.dataRootInput.value = data.data_root;
+    elements.dataRootOptions.innerHTML = data.candidates
+      .map((candidate) => `<option value="${escapeHtml(candidate)}"></option>`).join("");
+  } catch (error) { showToast(error.message); }
+}
+function clearSelection() {
+  stopPlayback(); clearTimeout(state.pollTimer); ++state.subjectToken;
+  state.selected = null; state.metadata = null; state.preview = null; state.position = 0;
+  state.mode = "raw"; resetVideos(); setModeButtons();
+  state.annotationView = false; updateSidebarView();
+  resetSets(); renderSubjects();
+  elements.currentSubject.textContent = "—";
+  elements.emptyState.hidden = false; elements.reviewArea.hidden = true;
+}
+async function applyDataRoot() {
+  const value = elements.dataRootInput.value.trim();
+  if (!value) return showToast("请填写数据目录路径");
+  try {
+    const data = await requestJson("/api/data-root", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data_root: value }),
+    });
+    elements.dataRootInput.value = data.data_root;
+    elements.dataRootOptions.innerHTML = data.candidates
+      .map((candidate) => `<option value="${escapeHtml(candidate)}"></option>`).join("");
+    clearSelection();
+    await loadSubjects();
+    showToast(`数据目录已切换: ${data.data_root}`);
   } catch (error) { showToast(error.message); }
 }
 async function loadSubjects({ autoSelect = false } = {}) {
@@ -539,14 +575,21 @@ elements.videoModeButton.addEventListener("click", activateVideoMode);
 elements.generatePreviewButton.addEventListener("click", generatePreview);
 elements.deletePreviewButton.addEventListener("click", deletePreview);
 elements.exitAnnotationButton.addEventListener("click", exitAnnotation);
+elements.applyDataRootButton.addEventListener("click", applyDataRoot);
+elements.dataRootInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") applyDataRoot();
+});
 elements.timeline.addEventListener("input", (event) => { stopPlayback(); updateTimeline(Number(event.target.value)); });
 elements.timeline.addEventListener("change", () => state.mode === "raw" && renderRawFrames());
 elements.playButton.addEventListener("click", togglePlayback);
 elements.stepBack.addEventListener("click", () => { stopPlayback(); updateTimeline(state.position - 10000 / Math.max(1, playbackDuration()), { immediate: true }); });
 elements.stepForward.addEventListener("click", () => { stopPlayback(); updateTimeline(state.position + 10000 / Math.max(1, playbackDuration()), { immediate: true }); });
 document.addEventListener("keydown", (event) => {
-  // 空格始终绑定为播放/暂停(评分输入框聚焦时同样生效;数字输入不会用到空格字符)
-  if (event.code === "Space") { event.preventDefault(); togglePlayback(); }
+  // 空格绑定为播放/暂停(评分输入框聚焦时同样生效;数字输入不会用到空格字符)。
+  // 数据目录是文本输入,路径可能含空格,聚焦它时空格留给路径本身。
+  if (event.code === "Space" && event.target !== elements.dataRootInput) {
+    event.preventDefault(); togglePlayback();
+  }
   if (event.target.matches("input")) return;
   if (event.code === "ArrowLeft") elements.stepBack.click(); if (event.code === "ArrowRight") elements.stepForward.click();
 });
@@ -566,4 +609,5 @@ document.addEventListener("keydown", (event) => {
     activateRawMode();
   });
 });
+loadDataRoot();
 loadSubjects({ autoSelect: true });

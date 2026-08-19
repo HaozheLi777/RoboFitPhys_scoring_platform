@@ -2,6 +2,9 @@
 cache/
 annotations/
 
+# 本地配置(每台机器各自维护,不进版本库)
+config.local.json
+
 # Python
 __pycache__/
 *.pyc
