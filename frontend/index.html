@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07110f" />
+    <title>RoboFit 双目评分台</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <div>
+            <strong>RoboFit</strong>
+            <p>动作评分工作台</p>
+          </div>
+        </div>
+
+        <section id="subjectSection" class="subject-section">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">DATA ARCHIVE</p>
+              <h2>选择被试</h2>
+            </div>
+            <button id="refreshButton" class="icon-button" type="button" title="刷新被试列表" aria-label="刷新被试列表">
+              <svg viewBox="0 0 24 24"><path d="M20 11a8.1 8.1 0 0 0-14.9-4M4 4v4h4M4 13a8.1 8.1 0 0 0 14.9 4M20 20v-4h-4"/></svg>
+            </button>
+          </div>
+          <label class="search-box">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+            <input id="subjectSearch" type="search" placeholder="搜索被试编号" autocomplete="off" />
+          </label>
+          <div id="subjectList" class="subject-list" aria-live="polite">
+            <div class="sidebar-skeleton"></div>
+            <div class="sidebar-skeleton short"></div>
+          </div>
+        </section>
+
+        <section id="annotationPanel" class="annotation-panel" hidden>
+          <div class="annotation-head">
+            <button id="exitAnnotationButton" class="icon-button" type="button" title="退出标注" aria-label="退出标注">
+              <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <div>
+              <p class="eyebrow">ANNOTATION</p>
+              <h2 id="annotationSubject">—</h2>
+            </div>
+          </div>
+          <div id="annotationList" class="annotation-list" aria-live="polite"></div>
+        </section>
+
+        <div class="sidebar-foot">
+          <span class="status-dot"></span>
+          <div><strong id="archiveCount">正在读取...</strong><small>本地数据归档</small></div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">DUAL RGB REVIEW</p>
+            <h1>双相机同步预览</h1>
+          </div>
+          <div class="topbar-meta">
+            <div class="subject-pill">
+              <span>当前被试</span>
+              <strong id="currentSubject">—</strong>
+            </div>
+            <div class="sync-pill"><span class="pulse"></span>时间轴已同步</div>
+          </div>
+        </header>
+
+        <section id="emptyState" class="empty-state">
+          <div class="empty-visual">
+            <div class="frame-outline left"></div>
+            <div class="frame-outline right"></div>
+            <div class="empty-play">▶</div>
+          </div>
+          <h2>从左侧选择一位被试</h2>
+          <p>选择后将在同一时间轴上加载两路 RGB 相机画面</p>
+        </section>
+
+        <section id="reviewArea" class="review-area" hidden>
+          <div class="preview-toolbar">
+            <div class="mode-switch" aria-label="预览模式">
+              <button id="rawModeButton" class="mode-button active" type="button">精确逐帧</button>
+              <button id="videoModeButton" class="mode-button" type="button" disabled>流畅视频</button>
+            </div>
+            <div class="preview-job">
+              <div class="preview-job-copy">
+                <span id="previewStatusDot" class="preview-status-dot"></span>
+                <div><strong id="previewStatusText">尚未生成流畅预览</strong><small id="previewStatusDetail">需要时生成临时 MP4，原始数据不受影响</small></div>
+              </div>
+              <div id="generationProgress" class="generation-progress" hidden><span id="generationProgressBar"></span></div>
+              <button id="generatePreviewButton" class="preview-action primary" type="button">生成流畅预览</button>
+              <button id="deletePreviewButton" class="preview-action danger" type="button" hidden>删除缓存</button>
+            </div>
+          </div>
+          <div class="viewer-grid">
+            <article class="camera-card">
+              <header>
+                <div class="camera-title"><span class="camera-index">01</span><div><strong>RGB 相机 1</strong><small>左侧视角 · CAM1</small></div></div>
+                <span class="camera-ready"><i></i>已载入</span>
+              </header>
+              <div class="image-stage">
+                <img id="cam1Image" alt="RGB 相机 1 当前帧" />
+                <video id="cam1Video" muted playsinline preload="metadata" hidden></video>
+                <div class="stage-grid"></div>
+                <div class="loading-shade"><span></span></div>
+                <span class="resolution-badge">640 × 480</span>
+              </div>
+              <footer><span id="cam1Frame">帧 —</span><span id="cam1Format">RGB / RAW</span></footer>
+            </article>
+
+            <article class="camera-card">
+              <header>
+                <div class="camera-title"><span class="camera-index">02</span><div><strong>RGB 相机 2</strong><small>右侧视角 · CAM2</small></div></div>
+                <span class="camera-ready"><i></i>已载入</span>
+              </header>
+              <div class="image-stage">
+                <img id="cam2Image" alt="RGB 相机 2 当前帧" />
+                <video id="cam2Video" muted playsinline preload="metadata" hidden></video>
+                <div class="stage-grid"></div>
+                <div class="loading-shade"><span></span></div>
+                <span class="resolution-badge">640 × 480</span>
+              </div>
+              <footer><span id="cam2Frame">帧 —</span><span id="cam2Format">RGB / RAW</span></footer>
+            </article>
+          </div>
+
+          <div class="timeline-panel">
+            <div class="transport">
+              <button id="stepBack" type="button" class="transport-button" title="后退 1 秒">−1s</button>
+              <button id="playButton" type="button" class="play-button" aria-label="播放"><span id="playIcon">▶</span></button>
+              <button id="stepForward" type="button" class="transport-button" title="前进 1 秒">+1s</button>
+            </div>
+            <div class="timeline-main">
+              <div class="timeline-labels">
+                <div><strong id="currentTime">00:00.0</strong><span id="totalTime"> / 00:00.0</span></div>
+                <span id="progressLabel">0.0%</span>
+              </div>
+              <input id="timeline" class="timeline" type="range" min="0" max="10000" value="0" step="1" aria-label="同步预览进度" />
+              <div class="timeline-ticks"><span>开始</span><span>25%</span><span>50%</span><span>75%</span><span>结束</span></div>
+            </div>
+            <div class="frame-summary">
+              <span>同步帧位</span>
+              <strong id="framePosition">00000</strong>
+            </div>
+          </div>
+
+        </section>
+
+        <div id="toast" class="toast" role="status"></div>
+      </main>
+    </div>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

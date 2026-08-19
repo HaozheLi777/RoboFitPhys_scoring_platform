@@ -1,0 +1,14 @@
+# 运行产物(不进版本库)
+cache/
+annotations/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# 杂项
+*.log
+preview.png
