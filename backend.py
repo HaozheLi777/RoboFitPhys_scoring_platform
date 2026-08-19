@@ -129,7 +129,15 @@ def _find_ffmpeg() -> str | None:
     if executable:
         return executable
     environment_binary = Path(sys.executable).resolve().parent / "ffmpeg"
-    return str(environment_binary) if environment_binary.is_file() else None
+    if environment_binary.is_file():
+        return str(environment_binary)
+    # requirements.txt 内置的 FFmpeg 二进制(可选依赖,缺包/下载失败时静默回退)
+    try:
+        import imageio_ffmpeg
+        bundled = imageio_ffmpeg.get_ffmpeg_exe()
+        return str(bundled) if bundled else None
+    except Exception:
+        return None
 
 
 def _read_local_config() -> dict[str, object]:

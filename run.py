@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import shutil
 import sys
 import threading
 import webbrowser
@@ -49,23 +48,33 @@ def main() -> int:
         input("按回车退出...")
         return 1
 
-    ffmpeg = shutil.which("ffmpeg") or (Path(sys.executable).resolve().parent / "ffmpeg")
-    if not ffmpeg or not Path(ffmpeg).is_file():
+    import backend  # 触发配置解析(参数 > 环境变量 > config.local.json > 默认值)
+
+    if not backend._find_ffmpeg():
         print("提示:未找到 FFmpeg。标注与逐帧预览不受影响,但无法生成流畅预览 MP4。")
-        print("安装 FFmpeg 后重启本程序即可(或把 ffmpeg 可执行文件放到 Python 同目录)。")
-        if sys.platform == "win32":
-            print("Windows 可执行: winget install ffmpeg  或从 https://ffmpeg.org 下载。")
+        print("requirements.txt 已包含 imageio-ffmpeg(自带二进制);或自行安装系统 FFmpeg 后重启。")
 
     host = os.getenv("SCORING_HOST", "127.0.0.1")
     port = int(os.getenv("SCORING_PORT", "8010"))
     url = f"http://{host if host not in ('0.0.0.0', '::') else '127.0.0.1'}:{port}"
 
+    def _open_browser() -> None:
+        # 无图形界面的服务器(SSH 远程部署)没有 xdg-open 可用方法,直接给出网址
+        if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            print(f"当前环境无图形界面,请手动打开浏览器访问: {url}")
+            return
+        try:
+            opened = webbrowser.open(url)
+        except Exception:
+            opened = False
+        if not opened:
+            print(f"未能自动打开浏览器,请手动访问: {url}")
+
     if not os.getenv("SCORING_NO_BROWSER"):
-        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.2, _open_browser).start()
 
     import uvicorn
 
-    import backend  # 触发配置解析(参数 > 环境变量 > config.local.json > 默认值)
     print(f"RoboFit 打分平台启动: {url}  (Ctrl+C 退出)")
     print(f"数据目录: {backend.app.state.data_root}")
     print(f"标注目录: {backend.app.state.annotations_root}")

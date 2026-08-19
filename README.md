@@ -59,9 +59,8 @@ bash scoring_platform/run.sh
 
 **FFmpeg**(仅"生成流畅预览 MP4"功能需要;标注与逐帧预览不需要):
 
-- Linux: `sudo apt install ffmpeg` / `conda install -c conda-forge ffmpeg`
-- macOS: `brew install ffmpeg`
-- Windows: `winget install ffmpeg`,或从 ffmpeg.org 下载后把 ffmpeg.exe 放到 Python 同目录
+- 一键方案:`requirements.txt` 已包含 `imageio-ffmpeg`(自带 FFmpeg 二进制),`pip install -r requirements.txt` 即装好
+- 备选:系统安装 — Linux `sudo apt install ffmpeg`,macOS `brew install ffmpeg`,Windows `winget install ffmpeg`(或把 ffmpeg.exe 放到 Python 同目录)
 
 ### 3. 导入数据
 
