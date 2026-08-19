@@ -129,7 +129,7 @@ python run.py
 
 标注文件与新环境的 data 完全匹配时(同一批采集数据),直接拷贝即无缝续用。
 
-## 测试(可选)
+## 测试
 
 ```bash
 pip install -r requirements-dev.txt
