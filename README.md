@@ -35,9 +35,9 @@
 ### 1. 获取代码
 
 ```bash
-mkdir ~/robo_fit_workspace && cd ~/robo_fit_workspace
-git clone <仓库地址> scoring_platform        # 或直接把 scoring_platform 目录拷贝过来
-mkdir data                                   # 与 scoring_platform 同级
+
+git clone https://github.com/HaozheLi777/RoboFitPhys_scoring_platform scoring_platform 
+
 ```
 
 ### 2. 安装环境
@@ -51,15 +51,8 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-**Linux 上如已有 conda 环境 env_robfit**(含 fastapi/numpy/opencv/ffmpeg),可直接:
 
-```bash
-bash scoring_platform/run.sh
-```
-
-**FFmpeg**(仅"生成流畅预览 MP4"功能需要;标注与逐帧预览不需要):
-
-- 一键方案:`requirements.txt` 已包含 `imageio-ffmpeg`(自带 FFmpeg 二进制),`pip install -r requirements.txt` 即装好
+- 一键方案:`requirements.txt` 已包含 `imageio-ffmpeg`,`pip install -r requirements.txt` 
 - 备选:系统安装 — Linux `sudo apt install ffmpeg`,macOS `brew install ffmpeg`,Windows `winget install ffmpeg`(或把 ffmpeg.exe 放到 Python 同目录)
 
 ### 3. 导入数据
@@ -74,7 +67,7 @@ bash scoring_platform/run.sh
 
 两路相机都齐全的被试才会出现在列表中。默认读取 `../data`(即 `scoring_platform/` 的上级目录下的 `data/`)。
 
-**数据在别的硬盘、不想搬?** 复制 `config.example.json` 为 `config.local.json`,
+**数据在别的硬盘** 复制 `config.example.json` 为 `config.local.json`,
 把 `data_root` 写成实际位置即可(详见下文「环境变量与本地配置」);也可以在
 **网页上直接切换**:左侧列表顶部的「数据目录」输入框选择/填写路径后点切换按钮,
 选择会写回 `config.local.json` 重启后保持(若配置了 `data_roots` 白名单,网页只能
@@ -91,6 +84,11 @@ python3 run.py
 run.bat
 # 或三平台统一
 python run.py
+```
+**Linux 上如已有 conda 环境 env_robfit**(含 fastapi/numpy/opencv/ffmpeg),可直接:
+
+```bash
+bash scoring_platform/run.sh
 ```
 
 启动器会自动检查依赖、提示 FFmpeg 状态,启动服务后**自动打开浏览器**
