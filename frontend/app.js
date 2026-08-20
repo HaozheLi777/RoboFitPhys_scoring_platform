@@ -4,6 +4,7 @@ const state = {
   renderTimer: null, pollTimer: null, playing: false,
   playStartedAt: 0, playStartPosition: 0, animationFrame: null,
   sets: [], drafts: {}, savingCard: null, annotationView: false,
+  scrub: null, lastTickAt: null,
 };
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -535,26 +536,80 @@ async function deletePreview() {
 }
 
 function stopPlayback() {
-  state.playing = false; elements.playIcon.textContent = "▶"; elements.playButton.setAttribute("aria-label", "播放");
+  state.playing = false; state.scrub = null; state.lastTickAt = null;
+  elements.playIcon.textContent = "▶"; elements.playButton.setAttribute("aria-label", "播放");
   [elements.cam1Video, elements.cam2Video].forEach((video) => video.pause());
   if (state.animationFrame) cancelAnimationFrame(state.animationFrame); state.animationFrame = null;
 }
+// 按住左右方向键: 倍速快退/快进,不中断播放,松手恢复原状态
+function startScrub(direction) {
+  if (!state.selected || !state.metadata || state.scrub) return;
+  state.scrub = { direction, wasPlaying: state.playing };
+  state.lastTickAt = null;
+  if (state.mode === "video") {
+    // 快进快退期间暂停浏览器自身的推进,由 rAF 手动驱动 currentTime,方向与速率精确可控
+    [elements.cam1Video, elements.cam2Video].forEach((video) => video.pause());
+  }
+  state.playing = true;
+  elements.playIcon.textContent = "Ⅱ"; elements.playButton.setAttribute("aria-label", "暂停");
+  state.playStartedAt = performance.now(); state.playStartPosition = state.position;
+  state.animationFrame = requestAnimationFrame(state.mode === "video" ? videoPlaybackTick : rawPlaybackTick);
+}
+async function stopScrub(resume = true) {
+  if (!state.scrub) return;
+  const wasPlaying = state.scrub.wasPlaying;
+  state.scrub = null; state.lastTickAt = null;
+  if (state.mode === "video") {
+    [elements.cam1Video, elements.cam2Video].forEach((video) => video.pause());
+    if (wasPlaying && resume) {
+      try {
+        await Promise.all([elements.cam1Video.play(), elements.cam2Video.play()]);
+        state.playing = true;
+        state.animationFrame = requestAnimationFrame(videoPlaybackTick);
+      } catch (_) { stopPlayback(); showToast("浏览器暂时无法播放该视频，请稍后重试"); }
+    } else {
+      stopPlayback();
+    }
+  } else {
+    if (wasPlaying && resume) {
+      // 从当前位置继续正常速度播放
+      state.playStartedAt = performance.now(); state.playStartPosition = state.position;
+      state.playing = true;
+      state.animationFrame = requestAnimationFrame(rawPlaybackTick);
+    } else {
+      stopPlayback();
+    }
+  }
+}
 function rawPlaybackTick(now) {
   if (!state.playing || state.mode !== "raw") return;
-  const next = state.playStartPosition + (now - state.playStartedAt) / 1000 / playbackDuration() * 10000;
+  const factor = state.scrub ? state.scrub.direction * 2.5 : 1;
+  const next = state.playStartPosition + factor * (now - state.playStartedAt) / 1000 / playbackDuration() * 10000;
   if (next >= 10000) { updateTimeline(10000, { immediate: true }); return stopPlayback(); }
+  if (next <= 0) { updateTimeline(0, { immediate: true }); return stopPlayback(); }
   updateTimeline(next); state.animationFrame = requestAnimationFrame(rawPlaybackTick);
 }
-function videoPlaybackTick() {
+function videoPlaybackTick(now) {
   if (!state.playing || state.mode !== "video") return;
   const master = elements.cam1Video, follower = elements.cam2Video;
-  if (Math.abs(follower.currentTime - master.currentTime) > 0.08) follower.currentTime = master.currentTime;
-  updateTimelineDisplay(playbackDuration() ? master.currentTime / playbackDuration() * 10000 : 0);
-  if (master.ended || master.currentTime >= playbackDuration() - 0.04) return stopPlayback();
+  if (state.scrub) {
+    const dt = state.lastTickAt == null ? 16.7 : Math.min(now - state.lastTickAt, 100);
+    state.lastTickAt = now;
+    const target = master.currentTime + state.scrub.direction * 2.5 * dt / 1000;
+    master.currentTime = Math.max(0, Math.min(target, playbackDuration() - 0.01));
+    follower.currentTime = master.currentTime;
+    updateTimelineDisplay(playbackDuration() ? master.currentTime / playbackDuration() * 10000 : 0);
+  } else {
+    if (Math.abs(follower.currentTime - master.currentTime) > 0.08) follower.currentTime = master.currentTime;
+    updateTimelineDisplay(playbackDuration() ? master.currentTime / playbackDuration() * 10000 : 0);
+    if (master.ended || master.currentTime >= playbackDuration() - 0.04) return stopPlayback();
+  }
   state.animationFrame = requestAnimationFrame(videoPlaybackTick);
 }
 async function togglePlayback() {
-  if (!state.metadata) return; if (state.playing) return stopPlayback();
+  if (!state.metadata) return;
+  if (state.scrub) { stopScrub(false); return; } // 快进快退中按空格 = 结束并保持暂停
+  if (state.playing) return stopPlayback();
   if (state.position >= 10000) updateTimeline(0, { immediate: true });
   state.playing = true; elements.playIcon.textContent = "Ⅱ"; elements.playButton.setAttribute("aria-label", "暂停");
   if (state.mode === "video") {
@@ -589,9 +644,15 @@ document.addEventListener("keydown", (event) => {
   // 数据目录是文本输入,路径可能含空格,聚焦它时空格留给路径本身。
   if (event.code === "Space" && event.target !== elements.dataRootInput) {
     event.preventDefault(); togglePlayback();
+    return;
   }
   if (event.target.matches("input")) return;
-  if (event.code === "ArrowLeft") elements.stepBack.click(); if (event.code === "ArrowRight") elements.stepForward.click();
+  // 按住左右方向键 =  倍速快退/快进(event.repeat 为按住重复触发,忽略)
+  if (event.code === "ArrowLeft" && !event.repeat) { event.preventDefault(); startScrub(-1); }
+  if (event.code === "ArrowRight" && !event.repeat) { event.preventDefault(); startScrub(1); }
+});
+document.addEventListener("keyup", (event) => {
+  if (event.code === "ArrowLeft" || event.code === "ArrowRight") stopScrub();
 });
 [elements.cam1Video, elements.cam2Video].forEach((video) => {
   video.addEventListener("loadedmetadata", () => {
